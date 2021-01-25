@@ -9,7 +9,6 @@ import io.netty.handler.ssl.SslContext;
 import io.netty.handler.ssl.SslContextBuilder;
 import io.netty.handler.ssl.SslProvider;
 import io.netty.resolver.DefaultAddressResolverGroup;
-import io.netty.util.AttributeKey;
 import org.reactivestreams.Publisher;
 import org.reactivestreams.Subscription;
 import org.slf4j.Logger;
@@ -44,6 +43,7 @@ class ReactorNettyClient {
     private static final int DEFAULT_MAX_HTTP_INITIAL_LINE_LENGTH = 4096; //4KB
     private static final int DEFAULT_MAX_HTTP_CHUNK_SIZE_IN_BYTES = 8192; //8KB
     private static final int DEFAULT_MAX_HTTP_REQUEST_HEADER_SIZE = 32 * 1024; //32 KB
+    private static final String REACTOR_NETTY_REQUEST_RECORD_KEY = "reactorNettyRequestRecordKey";
 
     private static final Logger logger = LoggerFactory.getLogger(ReactorNettyClient.class.getSimpleName());
 
@@ -60,40 +60,9 @@ class ReactorNettyClient {
         ReactorNettyClient reactorNettyClient = new ReactorNettyClient();
         reactorNettyClient.connectionProvider = connectionProvider;
         reactorNettyClient.httpClient = HttpClient
-                .create(connectionProvider)
-                .observe((conn, state) -> {
-                    Instant time = Instant.now();
-
-                    if (state.equals(HttpClientState.CONNECTED) || state.equals(HttpClientState.ACQUIRED)) {
-                        if (conn instanceof ConnectionObserver) {
-                            ConnectionObserver observer = (ConnectionObserver) conn;
-                            HttpRequest request = observer.currentContext().getOrDefault("request", null);
-                            request.reactorNettyRequestRecord().setTimeConnected(time);
-                        }
-                    }
-                    else if (state.equals(HttpClientState.CONFIGURED)) {
-                        if (conn instanceof ChannelOperations) {
-                            ChannelOperations observer = (ChannelOperations) conn;
-                            HttpRequest request = observer.currentContext().getOrDefault("request", null);
-                            request.reactorNettyRequestRecord().setTimeConfigured(time);
-                        }
-                    }
-                    else if (state.equals(HttpClientState.REQUEST_SENT)) {
-                        if (conn instanceof ChannelOperations) {
-                            ChannelOperations observer = (ChannelOperations) conn;
-                            HttpRequest request = observer.currentContext().getOrDefault("request", null);
-                            request.reactorNettyRequestRecord().setTimeSent(time);
-                        }
-                    }
-                    else if (state.equals(HttpClientState.RESPONSE_RECEIVED)) {
-                        if (conn instanceof ChannelOperations) {
-                            ChannelOperations observer = (ChannelOperations) conn;
-                            HttpRequest request = observer.currentContext().getOrDefault("request", null);
-                            request.reactorNettyRequestRecord().setTimeReceived(time);
-                        }
-                    }
-                })
-                .resolver(DefaultAddressResolverGroup.INSTANCE);
+            .create(connectionProvider)
+            .observe(getConnectionObserver())
+            .resolver(DefaultAddressResolverGroup.INSTANCE);
         reactorNettyClient.configureChannelPipelineHandlers();
         return reactorNettyClient;
     }
@@ -107,6 +76,54 @@ class ReactorNettyClient {
                                                   .maxHeaderSize(DEFAULT_MAX_HTTP_REQUEST_HEADER_SIZE)
                                                   .maxChunkSize(DEFAULT_MAX_HTTP_CHUNK_SIZE_IN_BYTES)
                                                   .validateHeaders(true));
+    }
+
+    private static ConnectionObserver getConnectionObserver() {
+        return (conn, state) -> {
+            Instant time = Instant.now();
+
+            if (state.equals(HttpClientState.CONNECTED) || state.equals(HttpClientState.ACQUIRED)) {
+                if (conn instanceof ConnectionObserver) {
+                    ConnectionObserver observer = (ConnectionObserver) conn;
+                    ReactorNettyRequestRecord requestRecord =
+                        observer.currentContext().getOrDefault(REACTOR_NETTY_REQUEST_RECORD_KEY, null);
+                    if (requestRecord == null) {
+                        throw new IllegalStateException("ReactorNettyRequestRecord not found in context");
+                    }
+                    requestRecord.setTimeConnected(time);
+                }
+            } else if (state.equals(HttpClientState.CONFIGURED)) {
+                if (conn instanceof ChannelOperations) {
+                    ChannelOperations observer = (ChannelOperations) conn;
+                    ReactorNettyRequestRecord requestRecord =
+                        observer.currentContext().getOrDefault(REACTOR_NETTY_REQUEST_RECORD_KEY, null);
+                    if (requestRecord == null) {
+                        throw new IllegalStateException("ReactorNettyRequestRecord not found in context");
+                    }
+                    requestRecord.setTimeConfigured(time);
+                }
+            } else if (state.equals(HttpClientState.REQUEST_SENT)) {
+                if (conn instanceof ChannelOperations) {
+                    ChannelOperations observer = (ChannelOperations) conn;
+                    ReactorNettyRequestRecord requestRecord =
+                        observer.currentContext().getOrDefault(REACTOR_NETTY_REQUEST_RECORD_KEY, null);
+                    if (requestRecord == null) {
+                        throw new IllegalStateException("ReactorNettyRequestRecord not found in context");
+                    }
+                    requestRecord.setTimeSent(time);
+                }
+            } else if (state.equals(HttpClientState.RESPONSE_RECEIVED)) {
+                if (conn instanceof ChannelOperations) {
+                    ChannelOperations observer = (ChannelOperations) conn;
+                    ReactorNettyRequestRecord requestRecord =
+                        observer.currentContext().getOrDefault(REACTOR_NETTY_REQUEST_RECORD_KEY, null);
+                    if (requestRecord == null) {
+                        throw new IllegalStateException("ReactorNettyRequestRecord not found in context");
+                    }
+                    requestRecord.setTimeReceived(time);
+                }
+            }
+        };
     }
 
     private SslContext sslContextInit() {
@@ -127,18 +144,6 @@ class ReactorNettyClient {
         final AtomicReference<ReactorNettyHttpResponse> responseReference = new AtomicReference<>();
 
         return this.httpClient
-//            .observe((connection, state) -> {
-//                Instant time = Instant.now();
-//                if (state.equals(HttpClientState.CONNECTED) || state.equals(HttpClientState.ACQUIRED)) {
-//                    request.reactorNettyRequestRecord().setTimeConnected(time);
-//                } else if (state.equals(HttpClientState.CONFIGURED)) {
-//                    request.reactorNettyRequestRecord().setTimeConfigured(time);
-//                } else if (state.equals(HttpClientState.REQUEST_SENT)) {
-//                    request.reactorNettyRequestRecord().setTimeSent(time);
-//                } else if (state.equals(HttpClientState.RESPONSE_RECEIVED)) {
-//                    request.reactorNettyRequestRecord().setTimeReceived(time);
-//                }
-//            })
             .keepAlive(true)
             .responseTimeout(responseTimeout)
             .request(HttpMethod.valueOf(request.httpMethod().toString()))
@@ -163,7 +168,7 @@ class ReactorNettyClient {
                 }
                 return throwable;
             })
-            .contextWrite(Context.of("request", request))
+            .contextWrite(Context.of(REACTOR_NETTY_REQUEST_RECORD_KEY, request.reactorNettyRequestRecord()))
             .single();
     }
 
