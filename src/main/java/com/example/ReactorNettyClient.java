@@ -21,6 +21,7 @@ import reactor.netty.ConnectionObserver;
 import reactor.netty.NettyOutbound;
 import reactor.netty.channel.ChannelOperations;
 import reactor.netty.http.client.HttpClient;
+import reactor.netty.http.client.HttpClientInfos;
 import reactor.netty.http.client.HttpClientRequest;
 import reactor.netty.http.client.HttpClientResponse;
 import reactor.netty.http.client.HttpClientState;
@@ -94,9 +95,9 @@ class ReactorNettyClient {
                 }
             } else if (state.equals(HttpClientState.CONFIGURED)) {
                 if (conn instanceof ChannelOperations) {
-                    ChannelOperations observer = (ChannelOperations) conn;
+                    HttpClientInfos httpClientInfo = (HttpClientInfos) conn;
                     ReactorNettyRequestRecord requestRecord =
-                        observer.currentContext().getOrDefault(REACTOR_NETTY_REQUEST_RECORD_KEY, null);
+                        httpClientInfo.currentContextView().getOrDefault(REACTOR_NETTY_REQUEST_RECORD_KEY, null);
                     if (requestRecord == null) {
                         throw new IllegalStateException("ReactorNettyRequestRecord not found in context");
                     }
@@ -104,9 +105,9 @@ class ReactorNettyClient {
                 }
             } else if (state.equals(HttpClientState.REQUEST_SENT)) {
                 if (conn instanceof ChannelOperations) {
-                    ChannelOperations observer = (ChannelOperations) conn;
+                    HttpClientInfos httpClientInfo = (HttpClientInfos) conn;
                     ReactorNettyRequestRecord requestRecord =
-                        observer.currentContext().getOrDefault(REACTOR_NETTY_REQUEST_RECORD_KEY, null);
+                        httpClientInfo.currentContextView().getOrDefault(REACTOR_NETTY_REQUEST_RECORD_KEY, null);
                     if (requestRecord == null) {
                         throw new IllegalStateException("ReactorNettyRequestRecord not found in context");
                     }
@@ -114,9 +115,9 @@ class ReactorNettyClient {
                 }
             } else if (state.equals(HttpClientState.RESPONSE_RECEIVED)) {
                 if (conn instanceof ChannelOperations) {
-                    ChannelOperations observer = (ChannelOperations) conn;
+                    HttpClientInfos httpClientInfo = (HttpClientInfos) conn;
                     ReactorNettyRequestRecord requestRecord =
-                        observer.currentContext().getOrDefault(REACTOR_NETTY_REQUEST_RECORD_KEY, null);
+                        httpClientInfo.currentContextView().getOrDefault(REACTOR_NETTY_REQUEST_RECORD_KEY, null);
                     if (requestRecord == null) {
                         throw new IllegalStateException("ReactorNettyRequestRecord not found in context");
                     }
