@@ -9,6 +9,7 @@ import reactor.netty.resources.ConnectionProvider;
 
 import java.net.URISyntaxException;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
@@ -21,26 +22,43 @@ public class MainApplication {
         logger.info("Started main");
         ConnectionProvider provider =
             ConnectionProvider.builder("test")
-                              .maxConnections(100)
+                              .maxConnections(10)
                               .maxIdleTime(Duration.ofMinutes(1))
                               .pendingAcquireTimeout(Duration.ofSeconds(45))
                               .pendingAcquireMaxCount(-1)
                               .build();
 
-        String[] hostList = { "http://yahoo.com", "http://google.com", "http://bing.com/",
-            "http://wordpress.com/", "http://example.com/" };
+        String[] hostList = { "http://yahoo.com"};
 
         ReactorNettyClient reactorNettyClient = ReactorNettyClient.createWithConnectionProvider(provider);
 
         List<Mono<HttpResponse>> responseList = new ArrayList<>();
         Random random = new Random();
-        for (int i = 0; i < 1000; i++) {
-            responseList.add(getResponseBody(reactorNettyClient, hostList, random));
-        }
-        Flux.merge(Flux.fromIterable(responseList), 50).map(HttpResponse::bodyAsString).collectList().block();
+//        for (int i = 0; i < 10; i++) {
+//            responseList.add(getResponseBody(reactorNettyClient, hostList, random));
+//        }
 
-        logger.info("Sleeping thread : {}", Thread.currentThread().getName());
-        Thread.sleep(5 * 1000 * 60);
+        for (int i = 0; i < 10; i++) {
+            int index = random.nextInt(hostList.length);
+            String uri = hostList[index];
+            HttpRequest request = new HttpRequest(HttpMethod.GET, uri);
+            Mono<HttpResponse> responseBody = getResponseBody(reactorNettyClient, request);
+            getResponseBody(reactorNettyClient, request).flatMap((response) -> {
+                request.reactorNettyRequestRecord().setTimeCompleted(Instant.now());
+                return Mono.just(response);
+            }).block();
+            logger.info("Request timeline is : {}", request.reactorNettyRequestRecord());
+        }
+
+//        Flux.merge(Flux.fromIterable(responseList), 50).map(HttpResponse::bodyAsString).collectList().block();
+//
+//        logger.info("Sleeping thread : {}", Thread.currentThread().getName());
+//        Thread.sleep(5 * 1000 * 60);
+    }
+
+    public static Mono<HttpResponse> getResponseBody(ReactorNettyClient client, HttpRequest request) {
+        logger.info("Calling : {}", request.uri());
+        return client.send(request, Duration.ofSeconds(5));
     }
 
     public static Mono<HttpResponse> getResponseBody(ReactorNettyClient client, String[] hostList, Random random) throws URISyntaxException {

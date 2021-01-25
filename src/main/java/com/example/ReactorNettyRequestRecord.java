@@ -134,4 +134,16 @@ public final class ReactorNettyRequestRecord {
     public void setTimeCompleted(Instant timeCompleted) {
         this.timeCompleted = timeCompleted;
     }
+
+    @Override
+    public String toString() {
+        return "ReactorNettyRequestRecord{" +
+                "timeCreated=" + timeCreated +
+                ", timeConnected=" + timeConnected +
+                ", timeConfigured=" + timeConfigured +
+                ", timeSent=" + timeSent +
+                ", timeReceived=" + timeReceived +
+                ", timeCompleted=" + timeCompleted +
+                '}';
+    }
 }

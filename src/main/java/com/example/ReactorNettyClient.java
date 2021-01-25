@@ -9,6 +9,7 @@ import io.netty.handler.ssl.SslContext;
 import io.netty.handler.ssl.SslContextBuilder;
 import io.netty.handler.ssl.SslProvider;
 import io.netty.resolver.DefaultAddressResolverGroup;
+import io.netty.util.AttributeKey;
 import org.reactivestreams.Publisher;
 import org.reactivestreams.Subscription;
 import org.slf4j.Logger;
@@ -17,11 +18,15 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.netty.ByteBufFlux;
 import reactor.netty.Connection;
+import reactor.netty.ConnectionObserver;
 import reactor.netty.NettyOutbound;
+import reactor.netty.channel.ChannelOperations;
+import reactor.netty.http.client.HttpClient;
 import reactor.netty.http.client.HttpClientRequest;
 import reactor.netty.http.client.HttpClientResponse;
 import reactor.netty.http.client.HttpClientState;
 import reactor.netty.resources.ConnectionProvider;
+import reactor.util.context.Context;
 
 import javax.net.ssl.SSLException;
 import java.nio.charset.Charset;
@@ -54,9 +59,41 @@ class ReactorNettyClient {
     public static ReactorNettyClient createWithConnectionProvider(ConnectionProvider connectionProvider) {
         ReactorNettyClient reactorNettyClient = new ReactorNettyClient();
         reactorNettyClient.connectionProvider = connectionProvider;
-        reactorNettyClient.httpClient = reactor.netty.http.client.HttpClient
-            .create(connectionProvider)
-            .resolver(DefaultAddressResolverGroup.INSTANCE);
+        reactorNettyClient.httpClient = HttpClient
+                .create(connectionProvider)
+                .observe((conn, state) -> {
+                    Instant time = Instant.now();
+
+                    if (state.equals(HttpClientState.CONNECTED) || state.equals(HttpClientState.ACQUIRED)) {
+                        if (conn instanceof ConnectionObserver) {
+                            ConnectionObserver observer = (ConnectionObserver) conn;
+                            HttpRequest request = observer.currentContext().getOrDefault("request", null);
+                            request.reactorNettyRequestRecord().setTimeConnected(time);
+                        }
+                    }
+                    else if (state.equals(HttpClientState.CONFIGURED)) {
+                        if (conn instanceof ChannelOperations) {
+                            ChannelOperations observer = (ChannelOperations) conn;
+                            HttpRequest request = observer.currentContext().getOrDefault("request", null);
+                            request.reactorNettyRequestRecord().setTimeConfigured(time);
+                        }
+                    }
+                    else if (state.equals(HttpClientState.REQUEST_SENT)) {
+                        if (conn instanceof ChannelOperations) {
+                            ChannelOperations observer = (ChannelOperations) conn;
+                            HttpRequest request = observer.currentContext().getOrDefault("request", null);
+                            request.reactorNettyRequestRecord().setTimeSent(time);
+                        }
+                    }
+                    else if (state.equals(HttpClientState.RESPONSE_RECEIVED)) {
+                        if (conn instanceof ChannelOperations) {
+                            ChannelOperations observer = (ChannelOperations) conn;
+                            HttpRequest request = observer.currentContext().getOrDefault("request", null);
+                            request.reactorNettyRequestRecord().setTimeReceived(time);
+                        }
+                    }
+                })
+                .resolver(DefaultAddressResolverGroup.INSTANCE);
         reactorNettyClient.configureChannelPipelineHandlers();
         return reactorNettyClient;
     }
@@ -90,18 +127,18 @@ class ReactorNettyClient {
         final AtomicReference<ReactorNettyHttpResponse> responseReference = new AtomicReference<>();
 
         return this.httpClient
-            .observe((connection, state) -> {
-                Instant time = Instant.now();
-                if (state.equals(HttpClientState.CONNECTED) || state.equals(HttpClientState.ACQUIRED)) {
-                    request.reactorNettyRequestRecord().setTimeConnected(time);
-                } else if (state.equals(HttpClientState.CONFIGURED)) {
-                    request.reactorNettyRequestRecord().setTimeConfigured(time);
-                } else if (state.equals(HttpClientState.REQUEST_SENT)) {
-                    request.reactorNettyRequestRecord().setTimeSent(time);
-                } else if (state.equals(HttpClientState.RESPONSE_RECEIVED)) {
-                    request.reactorNettyRequestRecord().setTimeReceived(time);
-                }
-            })
+//            .observe((connection, state) -> {
+//                Instant time = Instant.now();
+//                if (state.equals(HttpClientState.CONNECTED) || state.equals(HttpClientState.ACQUIRED)) {
+//                    request.reactorNettyRequestRecord().setTimeConnected(time);
+//                } else if (state.equals(HttpClientState.CONFIGURED)) {
+//                    request.reactorNettyRequestRecord().setTimeConfigured(time);
+//                } else if (state.equals(HttpClientState.REQUEST_SENT)) {
+//                    request.reactorNettyRequestRecord().setTimeSent(time);
+//                } else if (state.equals(HttpClientState.RESPONSE_RECEIVED)) {
+//                    request.reactorNettyRequestRecord().setTimeReceived(time);
+//                }
+//            })
             .keepAlive(true)
             .responseTimeout(responseTimeout)
             .request(HttpMethod.valueOf(request.httpMethod().toString()))
@@ -126,6 +163,7 @@ class ReactorNettyClient {
                 }
                 return throwable;
             })
+            .contextWrite(Context.of("request", request))
             .single();
     }
 
